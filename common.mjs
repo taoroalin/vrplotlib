@@ -173,7 +173,7 @@ export function showActivationAcrossPlanes(activation, planes, channelsLast = fa
 }
 
 export function threeTfTextureShaderMaterial(tensor) {
-  const glTex = decodedInternalTexture(tensor)
+  const glTex = gl.createTexture()
   return new THREE.ShaderMaterial({
     uniforms: { tfTexture: { value: glTex } },
     vertexShader: `
@@ -185,7 +185,6 @@ export function threeTfTextureShaderMaterial(tensor) {
 
 			}`,
     fragmentShader: `
-    
     uniform sampler2D tfTexture;
       varying vec2 vUv;
 			void main() {

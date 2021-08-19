@@ -29,6 +29,7 @@ export class NetVis {
         thiss.outputLayers.push(layer.outboundNodes[0].outputTensors[0])
       }
     }
+    console.log(model.outputs[0])
     const modelspec = { inputs: model.inputs, outputs: [...thiss.outputLayers, model.outputs[0]] }
     console.log(modelspec)
     thiss.model = tf.model(modelspec)
@@ -93,6 +94,16 @@ export class NetVis {
     return thiss
   }
 
+  //@STUCK I don't know of a way to alter the middle of a compute graph in tfjs
+  async createActivationInjectedVis(activationIndex) {
+    // FOR NOW THIS CORRUPTS OLD MODEL
+    const thiss = new NetVis()
+    const oldOutputs = this.model.outputs
+    const newInputTensor = oldOutputs[activationIndex].outboundNodes[0].outputTensors[0]
+    thiss.model = tf.model({ inputs: [...this.model.inputs, newInputTensor], outputs: oldOutputs.slice(activationIndex) })
+    return thiss
+  }
+
   translateSelectedPixel(dx, dy) {
     this.selectedPixel[0] = Math.min(Math.max(this.selectedPixel[0] + dx, 0), this.inputShape[1])
     this.selectedPixel[1] = Math.min(Math.max(this.selectedPixel[1] + dy, 0), this.inputShape[2])
@@ -103,7 +114,7 @@ export class NetVis {
     const oldGroup = this.activationPlaneGroups[this.selectedActivationIndex]
     for (let i = 0; i < oldGroup.length; i++) {
       const oldPlane = oldGroup[i]
-      oldPlane.material.opacity = this.transparency
+      oldPlane.children[0].material.opacity = this.transparency
     }
     const oldPos = oldGroup[0].position.z
     const oldPlane = this.activationPlaneGroups[this.selectedActivationIndex][this.selectedPlaneIndex]
@@ -115,10 +126,10 @@ export class NetVis {
     this.group.translateZ(oldPos - newPos)
     for (let i = 0; i < newGroup.length; i++) {
       const plane = newGroup[i]
-      plane.material.opacity = this.deselectedTransparency
+      plane.children[0].material.opacity = this.deselectedTransparency
     }
     const plane = newGroup[this.selectedPlaneIndex]
-    plane.material.opacity = 1
+    plane.children[0].material.opacity = 1
   }
 
   cycleImage() {
