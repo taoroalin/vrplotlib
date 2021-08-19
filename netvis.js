@@ -114,7 +114,7 @@ export class NetVis {
     const oldGroup = this.activationPlaneGroups[this.selectedActivationIndex]
     for (let i = 0; i < oldGroup.length; i++) {
       const oldPlane = oldGroup[i]
-      oldPlane.children[0].material.opacity = this.transparency
+      oldPlane.material.opacity = this.transparency
     }
     const oldPos = oldGroup[0].position.z
     const oldPlane = this.activationPlaneGroups[this.selectedActivationIndex][this.selectedPlaneIndex]
@@ -126,10 +126,10 @@ export class NetVis {
     this.group.translateZ(oldPos - newPos)
     for (let i = 0; i < newGroup.length; i++) {
       const plane = newGroup[i]
-      plane.children[0].material.opacity = this.deselectedTransparency
+      plane.material.opacity = this.deselectedTransparency
     }
     const plane = newGroup[this.selectedPlaneIndex]
-    plane.children[0].material.opacity = 1
+    plane.material.opacity = 1
   }
 
   cycleImage() {
