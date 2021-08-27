@@ -125,6 +125,17 @@ export function iTexOfPlane(plane) {
   return threeInternalTexture(plane.material.map)
 }
 
+
+
+export function showActivationPlane(activation, plane) {
+  let actExpanded = tf.depthToSpace(tf.expandDims(tf.tile(activation, [4, 1, 1]), 0), 2, 'NCHW')
+  // decodeTensor(actExpanded)
+  const tensInternal = tensorInternalTexture(actExpanded)
+  const texInternal = iTexOfPlane(plane)
+  // console.log(actExpanded.shape)
+  commonCopyTexture(tensInternal, texInternal, activation.shape[0], activation.shape[1])
+}
+
 export function showActivationAcrossPlanes(activation, planes, channelsLast = false, rgb = false) {
   if (channelsLast) {
     tf.tidy(() => {
