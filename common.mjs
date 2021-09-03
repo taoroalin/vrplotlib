@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import * as tf from "@tensorflow/tfjs";
-import { copyTexture } from "./gl.mjs";
+import { copyTexture, withAsFramebuffer } from "./gl.mjs";
 
 // import { getDenseTexShape } from "@tensorflow/tfjs-backend-webgl/src/tex_util"
 // import { bindVertexProgramAttributeStreams } from "./node_moduls/@tensorflow/tfjs-backend-webgl/src/gpgpu_util";
@@ -109,28 +109,27 @@ export function decodedInternalTexture(tensor) {
   return tensorInternalTexture(backend.decode(tensor.dataId))
 }
 
-export async function tensorTextureGl(tensor, texture) {
-  if (texture.uuid) {// if it's a three texture
-    texture = threeInternalTexture(texture)
-  }
-  const decInternalTex = decodedInternalTexture(tensor)
-  console.log(decInternalTex)
-  const texProps = renderer.properties.get(texture);
-  console.log(texProps)
-  const threeTexture = texProps.__webglTexture
-  copyTexture(gl, decInternalTex, threeTexture)
-}
-
 export function iTexOfPlane(plane) {
   return threeInternalTexture(plane.material.map)
 }
 
-
-
-export function showActivationPlane(activation, plane) {
-  let actExpanded = tf.depthToSpace(tf.expandDims(tf.tile(activation, [4, 1, 1]), 0), 2, 'NCHW')
+export function tensorTextureGl(tensor) {
+  let actExpanded = tf.depthToSpace(tf.expandDims(tf.tile(tensor.reverse(1).reverse(2), [4, 1, 1]), 0), 2, 'NCHW')
   // decodeTensor(actExpanded)
   const tensInternal = tensorInternalTexture(actExpanded)
+  return tensInternal
+}
+
+export function tensorThreeTextureGl(tensor) {
+  const tex = tensorTextureGl(tensor)
+  const threeTex = new THREE.Texture()
+  const internals = renderer.properties.get(threeTex)
+  internals.__webglTexture = tex
+  return threeTex
+}
+
+export function showActivationPlane(activation, plane) {
+  const tensInternal = tensorTextureGl(activation)
   const texInternal = iTexOfPlane(plane)
   // console.log(actExpanded.shape)
   commonCopyTexture(tensInternal, texInternal, activation.shape[0], activation.shape[1])
@@ -248,9 +247,25 @@ function normalizeImage(tensor, means, stds) {
 }
 
 export async function tensorImagePlane(tensor, opacity = 1) {
-  const texture = tensorTexture(tensor)
+  const texture = tensorThreeTextureGl(tensor)
   const plane = doubleSidedPlane(texture, opacity)
   return plane
+}
+
+export function tensorToArray(tensor) {
+  const decoded = tensorInternalTexture(tensor)
+  // const decoded = decodedInternalTexture(tensor)
+  console.log(tensor)
+  console.log(decoded)
+  const arr = new Float32Array(tensor.size)
+  const size = tensor.shape.reduce((a, b) => a * b)
+  const flatSize = Math.ceil(size / 4)
+  const w = Math.ceil(Math.sqrt(flatSize))
+  const h = Math.ceil(flatSize / w)
+  withAsFramebuffer(gl, decoded, w, h, () => {
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.FLOAT, arr)
+  })
+  return arr
 }
 
 export function doubleSidedPlane(texture, opacity = 1) {

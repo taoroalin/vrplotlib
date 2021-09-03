@@ -14,6 +14,13 @@ export function copyTexture(gl, input, output, width, height, rgb = false) {
   // console.log(`copytexture took ${performance.now() - stime}`)
 }
 
+export function withAsFramebuffer(gl, texture, width, height, f) {
+  const fbi = twgl.createFramebufferInfo(gl, [{ attachment: texture, format: gl.RGBA, type: gl.FLOAT }], width, height)
+  twgl.bindFramebufferInfo(gl, fbi)
+  f()
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+}
+
 export function copyTextureWah(gl, input, output, width, height) {
   const stime = performance.now()
   const format = gl.RGBA32F;

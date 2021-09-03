@@ -6,7 +6,6 @@ import { XRControllerModelFactory } from './example-webxr/XRControllerModelFacto
 
 import { imagePlane, setRendererAndTf, tfMode, threeMode } from "./common.mjs";
 
-// import { Demonetvis } from "./demonetvis.mjs"
 import { NetVis } from "./netvis.mjs";
 
 import { setWebGLContext } from "@tensorflow/tfjs-backend-webgl";
@@ -47,7 +46,7 @@ const tempfn = async () => {
   //   world.add(object)
   //   object.position.add(new THREE.Vector3(1, 1, 1))
   // })
-  visualization = await NetVis.create(world, canvas, { url: "./models/ResNet50/model.json" })
+  visualization = await NetVis.create(world, canvas, { models: "./models", name: "ResNet50", input: "n01514668_cock.jpeg", images: "./imagenet", deepdream: "./deepdream" })
   // visualization = await NetVis.create(world, { url: "https://tfhub.dev/google/tfjs-model/imagenet/inception_v2/feature_vector/3/default/1" })
   animate();
 }
