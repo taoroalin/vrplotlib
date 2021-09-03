@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { tensorImagePlane, imgUrlToTensor, imagePlane, showActivationAcrossPlanes } from "./common.mjs";
+import { tensorImagePlane, imgUrlToTensor, tensorTexture, tfMode, threeMode, imagePlane, commonCopyTexture, threeInternalTexture, showActivationAcrossPlanes } from "./common.mjs";
 import * as common from "./common.mjs";
 import * as tf from "@tensorflow/tfjs";
 import * as mobilenet from "@tensorflow-models/mobilenet"
@@ -8,136 +8,110 @@ import { Text } from 'troika-three-text'
 export class NetVis {
   // when I add the ability to modify activations, I'll do it by 
   static async create(world, canvas, config) {
-
-    const testtens = tf.tensor([[1, 2, 3], [5, 6, 7]])
-    console.log(testtens)
-    // const arr = common.tensorToArray(testtens)
-    // console.log("ARRAY", arr)
-
     const thiss = new NetVis()
-    await thiss.init(world, canvas, config)
-    return thiss
-  }
-
-  async init(world, canvas, config) {
-    this.transparency = 0.2
-    this.canvas = canvas
-    this.channelsLast = false;
-
-    this.spec = { layers: {}, focusedLayer: null, injected: {}, input: config.input, name: config.name }
-
-    this.dirs = { models: config.models, images: config.images, deepdream: config.deepdream }
-    const url = this.dirs.models + "/" + this.spec.name + "/model.json"
-    console.log(url)
-
-    const model = await tf.loadLayersModel(url)
-    this.world = world
-    this.group = new THREE.Group()
-    world.add(this.group)
-    this.group.position.z -= 8
-    this.group.position.x -= 7.5
-
-    this.activationsGroup = new THREE.Group()
-    this.group.add(this.activationsGroup)
-
-    this.topPredictions = []
-    this.outputLayers = []
+    thiss.transparency = 0.2
+    thiss.canvas = canvas
+    thiss.channelsLast = false;
+    const model = await tf.loadLayersModel(config.url)
+    thiss.world = world
+    thiss.group = new THREE.Group()
+    world.add(thiss.group)
+    thiss.group.position.z -= 8
+    thiss.group.position.x -= 7.5
+    thiss.topPredictions = []
+    console.log(model)
+    thiss.outputLayers = []
     for (let layer of model.layers) {
       if (layer.name.match(/conv\d?d?$/)) {
-        if (!this.channelsLast && layer.dataFormat === "channelsLast") {
-          this.channelsLast = true
+        if (!thiss.channelsLast && layer.dataFormat === "channelsLast") {
+          thiss.channelsLast = true
         }
-        this.outputLayers.push(layer.outboundNodes[0].outputTensors[0])
+        thiss.outputLayers.push(layer.outboundNodes[0].outputTensors[0])
       }
     }
-    const modelspec = { inputs: model.inputs, outputs: [...this.outputLayers, model.outputs[0]] }
-    this.model = tf.model(modelspec)
-    this.inputShape = model.feedInputShapes[0]
-    this.inputShape[0] = 1
-
-    for (let output of this.model.outputs) {
-      this.spec.layers[output.name] = { show: true, fv: false, shownFilters: [0], activeFilter: 0 }
-    }
-
-    this.widthScale = 1 / 50
-    this.sideSpacing = 1.5
-    this.inputPlane = await tensorImagePlane(tf.squeeze(tf.zeros(this.inputShape)), true)
-    this.inputPlane.scale.x = this.inputShape[1] * this.widthScale
-    this.inputPlane.scale.y = this.inputShape[1] * this.widthScale
-    this.inputPlane.scale.z = this.inputShape[1] * this.widthScale
-    this.group.add(this.inputPlane)
-
-    this.fontSize = 0.15
-    this.labelOffset = 0.3
-
-    let side = this.inputShape[1] * this.widthScale * this.sideSpacing
-    for (let li = 0; li < this.outputLayers.length; li++) {
-      const output = this.outputLayers[li]
+    console.log(model.outputs[0])
+    const modelspec = { inputs: model.inputs, outputs: [...thiss.outputLayers, model.outputs[0]] }
+    console.log(modelspec)
+    thiss.model = tf.model(modelspec)
+    console.log(thiss.model)
+    thiss.activationPlaneGroups = []
+    thiss.widthScale = 1 / 50
+    thiss.sideSpacing = 1.5
+    thiss.inputShape = model.feedInputShapes[0]
+    thiss.inputShape[0] = 1
+    thiss.inputPlane = await tensorImagePlane(tf.squeeze(tf.zeros(thiss.inputShape)), true)
+    thiss.inputPlane.scale.x = thiss.inputShape[1] * thiss.widthScale
+    thiss.inputPlane.scale.y = thiss.inputShape[1] * thiss.widthScale
+    thiss.inputPlane.scale.z = thiss.inputShape[1] * thiss.widthScale
+    thiss.group.add(thiss.inputPlane)
+    thiss.maxPlanes = 20
+    thiss.fontSize = 0.15
+    thiss.labelOffset = 0.3
+    let side = thiss.inputShape[1] * thiss.widthScale * thiss.sideSpacing
+    for (let li = 0; li < thiss.outputLayers.length; li++) {
+      const output = thiss.outputLayers[li]
       const actShape = output.shape
-      const numPlanes = Math.min(Math.ceil(actShape[3] / 3), this.maxPlanes)
+      const numPlanes = Math.min(Math.ceil(actShape[3] / 3), thiss.maxPlanes)
       const planes = []
 
       const activationGroup = new THREE.Group()
-      this.group.add(activationGroup)
+      thiss.group.add(activationGroup)
       activationGroup.position.x += side
-      side += actShape[1] * this.widthScale * this.sideSpacing
+      side += actShape[1] * thiss.widthScale * thiss.sideSpacing
 
       const activationLabel = new Text()
       activationGroup.add(activationLabel)
 
       const outputName = output.name.replaceAll(/(^.+\/)|(_bn)/g, "")
-      const approxLength = outputName.length * this.fontSize
+      const approxLength = outputName.length * thiss.fontSize
       activationLabel.text = outputName
-      activationLabel.fontSize = this.fontSize
+      activationLabel.fontSize = thiss.fontSize
       activationLabel.color = 0xFFFFFF
 
-      activationLabel.position.y -= actShape[1] * this.widthScale * 0.5 + this.labelOffset
+      activationLabel.position.y -= actShape[1] * thiss.widthScale * 0.5 + thiss.labelOffset
       activationLabel.position.x -= approxLength * 0.27
 
       activationLabel.sync()
 
-      const planeShape = this.channelsLast ? [actShape[1], actShape[2], 1] : [1, actShape[2], actShape[3]];
+      const planeShape = thiss.channelsLast ? [actShape[1], actShape[2], 1] : [1, actShape[2], actShape[3]];
       for (let i = 0; i < numPlanes; i++) {
-        const plane = await tensorImagePlane(tf.zeros(planeShape), this.transparency)
+        const plane = await tensorImagePlane(tf.zeros(planeShape), thiss.transparency)
         plane.position.z += i * 0.05
-        plane.scale.x = actShape[1] * this.widthScale
-        plane.scale.z = actShape[1] * this.widthScale
-        plane.scale.y = actShape[1] * this.widthScale
+        plane.scale.x = actShape[1] * thiss.widthScale
+        plane.scale.z = actShape[1] * thiss.widthScale
+        plane.scale.y = actShape[1] * thiss.widthScale
         activationGroup.add(plane)
         planes.push(plane)
       }
-      // this.activationPlaneGroups.push(planes)
+      thiss.activationPlaneGroups.push(planes)
     }
 
-    this.pixelSelectObj = new THREE.Mesh(new THREE.BoxGeometry(this.widthScale, this.widthScale, this.widthScale * 10), new THREE.MeshBasicMaterial({ color: 0x00ff00 }))
-    this.group.add(this.pixelSelectObj)
-    this.pixelSelectObj.position.z -= this.widthScale
+    thiss.pixelSelectObj = new THREE.Mesh(new THREE.BoxGeometry(thiss.widthScale, thiss.widthScale, thiss.widthScale * 10), new THREE.MeshBasicMaterial({ color: 0x00ff00 }))
+    thiss.group.add(thiss.pixelSelectObj)
+    thiss.pixelSelectObj.position.z -= thiss.widthScale
 
-    this.updating = false
-    this.activationTensors = {}
-    this.delay = 4
-    this.lastUpdate = -9999999999
+    thiss.updating = false
+    thiss.inputTensor = tf.zeros(thiss.inputShape)
+    thiss.activationTensors = []
+    thiss.delay = 4
+    thiss.lastUpdate = -9999999999
 
-    this.inputTensor = (await this.getImageTensor(this.spec.input)).resizeBilinear([this.inputShape[1], this.inputShape[2]])
-    this.selectedActivationIndex = 0
-    this.selectedPlaneIndex = 0
-    this.selectedPixel = [0, 0]
+    const images = (await Promise.all(["n01440764_tench.jpeg", "n01443537_goldfish.jpeg", "n01484850_great_white_shark.jpeg", "n01491361_tiger_shark.jpeg", "n01494475_hammerhead.jpeg"].map(url => imgUrlToTensor("./imagenet/" + url)))).map(x => x.resizeBilinear([thiss.inputShape[1], thiss.inputShape[2]]))
+    thiss.images = images
+    thiss.imageIndex = 0
+    console.log("HEREs the IMAGE", await images[0].data())
+    thiss.inputTensor = images[0]
+    thiss.selectedActivationIndex = 0
+    thiss.selectedPlaneIndex = 0
+    thiss.selectedPixel = [0, 0]
+    thiss.deselectedTransparency = 0.025
+    thiss.setSelected(0, 0)
+    thiss.translateSelectedPixel(0, 0)
 
+    thiss.doCycleImage = true
+    thiss.setupListeners()
 
-    this.setupListeners()
-
-    return this
-  }
-
-  createFilterVisual(symbolicTensor, idx) {
-    const shape = symbolicTensor.shape
-    const plane = tensorImagePlane()
-  }
-
-  async getImageTensor(name) {
-    const url = this.dirs.images + "/" + name
-    const t = await imgUrlToTensor(url)
-    return t.resizeBilinear([this.inputShape[1], this.inputShape[2]])
+    return thiss
   }
 
   //@STUCK I don't know of a way to alter the middle of a compute graph in tfjs
@@ -150,19 +124,44 @@ export class NetVis {
     return thiss
   }
 
-  getFeatureVisualizationPlane(name, number) {
-    const url = `./deepdream/filter/${this.model.name}/${name}/${number}.jpg`
-    const plane = imagePlane(url)
-    return plane
-  }
-
   translateSelectedPixel(dx, dy) {
     this.selectedPixel[0] = Math.min(Math.max(this.selectedPixel[0] + dx, 0), this.inputShape[1])
     this.selectedPixel[1] = Math.min(Math.max(this.selectedPixel[1] + dy, 0), this.inputShape[2])
 
   }
 
-  async display_old() {
+  setSelected(ai, pi) {
+    const oldGroup = this.activationPlaneGroups[this.selectedActivationIndex]
+    for (let i = 0; i < oldGroup.length; i++) {
+      const oldPlane = oldGroup[i]
+      oldPlane.material.opacity = this.transparency
+    }
+    const oldPos = new THREE.Vector3()
+    oldGroup[0].getWorldPosition(oldPos)
+    const oldPlane = this.activationPlaneGroups[this.selectedActivationIndex][this.selectedPlaneIndex]
+
+    this.selectedActivationIndex = Math.min(Math.max(ai, 0), this.activationPlaneGroups.length - 1)
+    const newGroup = this.activationPlaneGroups[this.selectedActivationIndex]
+    this.selectedPlaneIndex = (pi + newGroup.length) % (newGroup.length)
+    const newPos = new THREE.Vector3()
+    newGroup[0].getWorldPosition(newPos)
+    console.log(newPos)
+    this.group.position.add(oldPos)
+    this.group.position.sub(newPos)
+    for (let i = 0; i < newGroup.length; i++) {
+      const plane = newGroup[i]
+      plane.material.opacity = this.deselectedTransparency
+    }
+    const plane = newGroup[this.selectedPlaneIndex]
+    plane.material.opacity = 1
+  }
+
+  cycleImage() {
+    this.imageIndex = (this.imageIndex + 1) % this.images.length
+    this.inputTensor = this.images[this.imageIndex]
+  }
+
+  async display() {
     tf.tidy(() => {
       showActivationAcrossPlanes(this.inputTensor, [this.inputPlane], this.channelsLast, true)
       for (let i = 0; i < this.activationTensors.length; i++) {
@@ -176,46 +175,22 @@ export class NetVis {
     // this.activationTensors[10].data().then(x => console.log("activation 10", x))
   }
 
-  async display() {
-
-    for (let layer in this.spec.layers) {
-      if (layer.show) {
-        console.log(layer)
-        for (let filter in layer.filters) {
-
-        }
-      }
-    }
-  }
-
   async _update() {
-    for (let k in this.activationTensors) {
-      const t = this.activationTensors[k]
-      t.dispose()
-    }
-    this.activationTensors = {}
+    if (this.doCycleImage) this.cycleImage()
+    this.activationTensors.forEach(t => t.dispose())
     const pstime = performance.now()
-    const at = this.model.predict(this.inputTensor)
-    for (let i = 0; i < this.model.outputs.length; i++) {
-      const output = this.model.outputs[i]
-      this.activationTensors[output.name] = at[i]
-      if (i === this.model.outputs.length - 1) this.probs = at[i]
-    }
-    const dstime = performance.now()
-    const probsArray = this.probs.dataSync()
-    // const arr = common.tensorToArray(this.probs)
-    console.log('datasync took', performance.now() - dstime)
-    const zipped = []
-    for (let i = 0; i < probsArray.length; i++) {
-      zipped.push([probsArray[i], i])
-    }
-    zipped.sort((a, b) => b[0] - a[0])
-
-    for (let i = 0; i < 1; i++) {
-      console.log(imagenetLabels[zipped[i][1]])
-    }
+    this.activationTensors = this.model.predict(this.inputTensor)
+    this.probs = this.activationTensors.pop()
+    this.probs.data().then((data) => {
+      const zipped = Array.from(data).map((x, i) => {
+        return [x, i]
+      })
+      zipped.sort((a, b) => b[0] - a[0])
+      for (let i = 0; i < 1; i++) {
+        console.log(imagenetLabels[zipped[i][1]])
+      }
+    })
     console.log(`predict took ${performance.now() - pstime}`)
-
     await this.display()
   }
 
