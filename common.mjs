@@ -282,9 +282,10 @@ export function doubleSidedPlane(texture, opacity = 1) {
     // blending: THREE.AdditiveBlending,
   });
   // make one visible from front and one from back
-  const object2 = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material)
-  object2.rotateY(Math.PI)
-  return object2
+  const plane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material)
+  plane.frustumCulled = false
+  plane.rotateY(Math.PI)
+  return plane
 }
 
 export function imagePlane(url, callback) {
@@ -302,7 +303,6 @@ export function imagePlane(url, callback) {
     undefined,
     // onError callback
     function (err) {
-      console.error('couldnt find picture ' + url);
       callback(null)
     }
   );

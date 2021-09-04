@@ -25,22 +25,25 @@ export class NetVis {
     this.horizontalSpacing = 0.2
     this.canvas = canvas
     this.channelsLast = false;
+    this.uniformFilterSize = true
 
     this.spec = { layers: {}, focusedLayer: null, zoom: 1, injected: {}, input: config.input, name: config.name, cameraLocked: true, }
 
     this.dirs = { models: config.models, images: config.images, deepdream: config.deepdream }
     const url = this.dirs.models + "/" + this.spec.name + "/model.json"
-    this.dreamurl = this.dirs.deepdream + `/filters/${this.spec.name}/`
+    this.dreamurl = this.dirs.deepdream + `/filter/${this.spec.name}/`
     this.dreamcache = {}
     console.log(url)
 
     const model = await tf.loadLayersModel(url)
+    console.log(model)
     this.world = world
     this.group = new THREE.Group()
     this.group.name = ("netvis")
     world.add(this.group)
     this.group.position.z -= 8
-    this.group.position.x -= 7.5
+    this.group.position.x = 0
+    this.group.position.y = 0
 
     this.activationsGroup = new THREE.Group()
     this.activationsGroup.name = "activations"
@@ -49,11 +52,12 @@ export class NetVis {
     this.topPredictions = []
     this.outputLayers = []
     for (let layer of model.layers) {
-      if (layer.name.match(/conv\d?d?$/)) {
+      if (layer.name.match(/conv\d?d?$/) && !layer.name.match(/bn$/)) {
         if (!this.channelsLast && layer.dataFormat === "channelsLast") {
           this.channelsLast = true
         }
-        this.outputLayers.push(layer.outboundNodes[0].outputTensors[0])
+        const symTensor = layer.outboundNodes[0].outputTensors[0]
+        this.outputLayers.push(symTensor)
       }
     }
     const modelspec = { inputs: model.inputs, outputs: [...this.outputLayers, model.outputs[0]] }
@@ -67,12 +71,6 @@ export class NetVis {
 
     this.widthScale = 1 / 50
     this.sideSpacing = 1.5
-    this.inputPlane = await tensorImagePlane(tf.squeeze(tf.zeros(this.inputShape)), true)
-    this.inputPlane.scale.x = this.inputShape[1] * this.widthScale
-    this.inputPlane.scale.y = this.inputShape[1] * this.widthScale
-    this.inputPlane.scale.z = this.inputShape[1] * this.widthScale
-    // this.group.add(this.inputPlane)
-    this.inputPlane.visible = false;
 
     this.fontSize = 0.15
     this.labelOffset = 0.3
@@ -123,6 +121,14 @@ export class NetVis {
     this.selectedPlaneIndex = 0
     this.selectedPixel = [0, 0]
 
+    this.inputPlane = await tensorImagePlane(this.inputTensor.slice([0, 0, 0, 0], [1, -1, -1, 1]).squeeze(0), true)
+    this.inputPlane.scale.x = this.inputShape[1] * this.widthScale * 0.5
+    this.inputPlane.scale.y = this.inputShape[1] * this.widthScale * 0.5
+    this.inputPlane.scale.z = this.inputShape[1] * this.widthScale * 0.5
+    this.inputPlane.position.z = 8
+    this.inputPlane.position.y = -6
+    this.world.add(this.inputPlane)
+
 
     this.setupListeners()
 
@@ -132,12 +138,13 @@ export class NetVis {
   }
 
   actName(x) {
-    return x.name.match(/^[^/]+/)[0]
+    return x.name.match(/^[^/]+/)[0].replace("_bn", "_conv")
+    // return x.name.match(/^[^/]+/)[0]
   }
 
   async getDream(layerName, idx) {
     const cachename = layerName + "." + idx
-    const url = this.dreamurl + layerName + "/" + idx + ".jpg"
+    const url = this.dreamurl + layerName + "/" + idx + ".png"
     if (this.dreamcache[cachename] !== undefined) {
       return this.dreamcache[cachename]
     } else {
@@ -212,7 +219,7 @@ export class NetVis {
 
         layerGroup.visible = true;
         const layerShape = common.debatchShape(layer.shape)
-        const scale = layer.shape[1] * this.widthScale
+        const scale = this.uniformFilterSize ? 1 : layer.shape[1] * this.widthScale;
         const xtaken = scale + scale + this.horizontalSpacing * 2
         layerGroup.position.x = xposition
         xposition += xtaken
@@ -223,10 +230,11 @@ export class NetVis {
           filterGroup.add(plane)
           plane.name = "filter"
           plane.position.z += i * 0.05
-          plane.scale.x = layerShape[1] * this.widthScale
-          plane.scale.z = layerShape[1] * this.widthScale
-          plane.scale.y = layerShape[1] * this.widthScale
-          console.log("creating plane")
+          if (!this.uniformFilterSize) {
+            plane.scale.x = layerShape[1] * this.widthScale
+            plane.scale.z = layerShape[1] * this.widthScale
+            plane.scale.y = layerShape[1] * this.widthScale
+          }
         }
         for (let i = layer.shownFilters.length; i < filtersGroup.children.length; i++) {
           const plane = filtersGroup.children[i]
@@ -244,12 +252,12 @@ export class NetVis {
           zposition += height
           // console.log(filterTensor.dataSync())
           common.showActivationPlane(filterTensor, filterPlane)
-          // const dream = await this.getDream(layerName, filter)
-          const dream = null
-          if (dream) {
-            filterGroup.add(dream)
-            dream.position.x += scale + this.horizontalSpacing
-          }
+          this.getDream(layerName, filter).then(dream => {
+            if (dream) {
+              filterGroup.add(dream)
+              dream.position.x = scale + this.horizontalSpacing
+            }
+          })
           if (this.spec.cameraLocked && layer.focusedFilter == filter) {
             this.world.position.z = zposition
           }
@@ -368,6 +376,7 @@ export class NetVis {
         }
       }
       if (caught) {
+        this.display()
         event.preventDefault()
       }
     })

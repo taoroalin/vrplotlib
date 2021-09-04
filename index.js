@@ -75,10 +75,10 @@ async function init() {
 
   // this is flatscreen camera - xr makes camera with different settings
   camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.07, 300);
-  camera.position.set(0, 1.6, 3);
+  camera.position.set(0, 0.6, 0);
 
   controls = new OrbitControls(camera, container);
-  controls.target.set(0, 1.6, 0);
+  controls.target.set(0, 0.6, 0);
   controls.update();
 
   const useFloor = false
