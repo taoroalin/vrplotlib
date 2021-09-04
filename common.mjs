@@ -114,10 +114,14 @@ export function iTexOfPlane(plane) {
 }
 
 export function tensorTextureGl(tensor) {
-  let actExpanded = tf.depthToSpace(tf.expandDims(tf.tile(tensor.reverse(1).reverse(2), [4, 1, 1]), 0), 2, 'NCHW')
+  let actExpanded = tf.depthToSpace(tf.expandDims(tf.tile(tf.transpose(tensor, [2, 0, 1]).reverse(1).reverse(2), [4, 1, 1]), 0), 2, 'NCHW')
   // decodeTensor(actExpanded)
   const tensInternal = tensorInternalTexture(actExpanded)
   return tensInternal
+}
+
+export function debatchShape(shape) {
+  return [shape[1], shape[2], shape[3]]
 }
 
 export function tensorThreeTextureGl(tensor) {
@@ -205,7 +209,7 @@ export function threeTfTextureShaderMaterial(tensor) {
   })
 }
 
-export function tensorTexture(tensor, useInt = false) { // @SWITCHY
+export function tensorThreeTexture(tensor, useInt = false) { // @SWITCHY
   if (tensor.shape.length !== 3) {
     throw new Error(`image tensor needs to have 3 dims, is shape ${JSON.stringify(tensor.shape)}`)
   }
@@ -247,7 +251,7 @@ function normalizeImage(tensor, means, stds) {
 }
 
 export async function tensorImagePlane(tensor, opacity = 1) {
-  const texture = tensorThreeTextureGl(tensor)
+  const texture = tensorThreeTexture(tensor)
   const plane = doubleSidedPlane(texture, opacity)
   return plane
 }
@@ -298,7 +302,8 @@ export function imagePlane(url, callback) {
     undefined,
     // onError callback
     function (err) {
-      console.error('An error happened.');
+      console.error('couldnt find picture ' + url);
+      callback(null)
     }
   );
 }
