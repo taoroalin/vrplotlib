@@ -3,7 +3,7 @@
 
 /** @type {import("snowpack").SnowpackUserConfig } */
 module.exports = {
-  exclude: ['**/.git/**/*'],
+  exclude: ['**/.git/**/*', '/deepdream/**/*'],
   workspaceRoot: "/",
   mount: {
 

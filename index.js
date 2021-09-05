@@ -47,6 +47,7 @@ const tempfn = async () => {
   //   object.position.add(new THREE.Vector3(1, 1, 1))
   // })
   visualization = await NetVis.create(world, canvas, { models: "./models", name: "ResNet50", input: "n01514668_cock.jpeg", images: "./imagenet", deepdream: "./deepdream" })
+  window.vis = visualization
   // visualization = await NetVis.create(world, { url: "https://tfhub.dev/google/tfjs-model/imagenet/inception_v2/feature_vector/3/default/1" })
   animate();
 }
