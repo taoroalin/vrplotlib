@@ -27,7 +27,7 @@ export class NetVis {
     this.channelsLast = false;
     this.uniformFilterSize = 2
 
-    this.spec = { layers: {}, zoom: 1, injected: {}, input: config.input, name: config.name, cameraLocked: true, }
+    this.spec = { layers: {}, zoom: 0, injected: {}, input: config.input, name: config.name, cameraLocked: true, }
 
     this.dirs = { models: config.models, images: config.images, deepdream: config.deepdream }
     const url = this.dirs.models + "/" + this.spec.name + "/model.json"
@@ -88,23 +88,17 @@ export class NetVis {
       activationGroup.position.x += side
       side += actShape[1] * this.widthScale * this.sideSpacing
 
-      const activationLabel = new Text()
+      const outputName = this.actName(output) // .replaceAll(/(^.+\/)|(_bn)/g, "")
+      const activationLabel = this.createText(outputName)
       activationGroup.add(activationLabel)
-      activationLabel.name = "label"
+
       const filtersGroup = new THREE.Group()
       filtersGroup.name = "filters"
       activationGroup.add(filtersGroup)
 
-      const outputName = this.actName(output) // .replaceAll(/(^.+\/)|(_bn)/g, "")
-      const approxLength = outputName.length * this.fontSize
-      activationLabel.text = outputName
-      activationLabel.fontSize = this.fontSize
-      activationLabel.color = 0xFFFFFF
       const scale = this.getScale(actShape)
       activationLabel.position.y -= scale * 0.5 + this.labelOffset
-      activationLabel.position.x -= approxLength * 0.27
 
-      activationLabel.sync()
       // this.activationPlaneGroups.push(planes)
     }
 
@@ -123,12 +117,15 @@ export class NetVis {
     this.selectedPixel = [0, 0]
 
     this.inputPlane = await tensorImagePlane(this.inputTensor.slice([0, 0, 0, 0], [1, -1, -1, 1]).squeeze(0), true)
-    this.inputPlane.scale.x = this.inputShape[1] * this.widthScale * 0.5
-    this.inputPlane.scale.y = this.inputShape[1] * this.widthScale * 0.5
-    this.inputPlane.scale.z = this.inputShape[1] * this.widthScale * 0.5
-    this.inputPlane.position.z = 8
-    this.inputPlane.position.y = -6
-    this.world.add(this.inputPlane)
+    this.inputPlane.scale.x = this.inputShape[1] * this.widthScale * 0.2
+    this.inputPlane.scale.y = this.inputShape[1] * this.widthScale * 0.2
+    this.inputPlane.scale.z = this.inputShape[1] * this.widthScale * 0.2
+    this.inputPlane.position.z = 0
+    this.inputPlane.position.y = -3
+    this.inputPlane.position.x = -0.5
+    this.inputPlane.rotateY(Math.PI)
+    this.inputPlane.rotateZ(-Math.PI * 0.5)
+    this.group.add(this.inputPlane)
 
 
     this.setupListeners()
@@ -210,11 +207,24 @@ export class NetVis {
     // this.activationTensors[10].data().then(x => console.log("activation 10", x))
   }
 
+  createText(text, size = 1) {
+    const result = new Text()
+    result.text = text
+    result.fontSize = this.fontSize * size
+    result.color = 0xFFFFFF
+    const approxLength = text.length * this.fontSize * size
+    result.position.x -= approxLength * 0.3
+    result.name = "label"
+    result.sync()
+    return result
+  }
+
   async display() {
     this.displaying = true
     const layersGroup = this.group.getObjectByName('activations')
     let xposition = 0;
     let skipped = false
+    common.showActivationPlane(this.inputTensor.squeeze(0).slice([0, 0, 0], [-1, -1, 1]), this.inputPlane)
     for (let layerName in this.spec.layers) {
       if (layerName === "predictions") continue
       if (!skipped) {
@@ -235,6 +245,11 @@ export class NetVis {
         xposition += xtaken
         for (let i = filtersGroup.children.length; i < layer.shownFilters.length; i++) {
           const filterGroup = new THREE.Group()
+          const label = this.createText("i", 2)
+          filterGroup.add(label)
+          label.position.x -= 0.01
+          label.position.y += this.fontSize * 1
+
           filtersGroup.add(filterGroup)
           const plane = await tensorImagePlane(tf.zeros(layerShape))
           filterGroup.add(plane)
@@ -255,6 +270,9 @@ export class NetVis {
         for (let i = 0; i < layer.shownFilters.length; i++) {
           const filter = layer.shownFilters[i]
           const filterGroup = filtersGroup.children[i]
+          const filterLabel = filterGroup.getObjectByName("label")
+          filterLabel.text = filter
+          filterLabel.sync()
           const filterPlane = filterGroup.getObjectByName("filter")
           const filterTensor = tf.slice(output, [0, 0, 0, filter], [-1, -1, -1, 1]).squeeze(0)
           filterGroup.position.z = zposition
@@ -284,10 +302,14 @@ export class NetVis {
         }
         if (this.spec.cameraLocked && this.spec.focusedLayer == layerName) {
           this.world.position.x = -xposition + 4
+          this.inputPlane.position.x = xposition - 4
         }
       } else {
         layerGroup.visible = false;
       }
+    }
+    if (this.spec.cameraLocked) {
+      this.world.position.z = this.spec.zoom * 2
     }
     this.displaying = false
   }
@@ -311,7 +333,7 @@ export class NetVis {
     const dstime = performance.now()
     this.probs.data().then(probsArray => {
       // const arr = common.tensorToArray(this.probs)
-      console.log('datasync took', performance.now() - dstime)
+      console.log('data took', performance.now() - dstime)
       const zipped = []
       for (let i = 0; i < probsArray.length; i++) {
         zipped.push([probsArray[i], i])
@@ -368,6 +390,15 @@ export class NetVis {
     this.setToDisplay()
   }
 
+  zoomIn() {
+    this.spec.zoom += 1
+    this.setToDisplay()
+  }
+
+  zoomOut() {
+    this.spec.zoom -= 1
+    this.setToDisplay()
+  }
   setToDisplay() {
     this.visualDirty = true
   }
@@ -379,28 +410,21 @@ export class NetVis {
   setupListeners() {
     document.addEventListener("keydown", (event) => {
       let caught = true
-      if (event.shiftKey) {
+      if (event.ctrlKey) {
         switch (event.key) {
           case "ArrowRight":
-            this.group.rotation.y -= 0.05
-            break
-          case "ArrowLeft":
-            this.group.rotation.y += 0.05
-            break
-          default:
-            caught = false;
-        }
-      } else if (event.ctrlKey) {
-        switch (event.key) {
-          case "ArrowRight":
+          case "d":
             this.translateSelectedPixel(1, 0)
             break;
           case "ArrowLeft":
+          case "a":
             this.translateSelectedPixel(-1, 0)
             break;
           case "ArrowUp":
+          case "w":
             this.translateSelectedPixel(0, 1)
             break;
+          case "s":
           case "ArrowDown":
             this.translateSelectedPixel(0, -1)
             break;
@@ -410,17 +434,27 @@ export class NetVis {
       } else {
         switch (event.key) {
           case "ArrowUp":
+          case "w":
             this.selectNextFilterOrder(1)
             break;
           case "ArrowDown":
+          case "s":
             this.selectNextFilterOrder(-1)
             break;
           case "ArrowRight":
+          case "d":
             this.selectNextLayerOrder(1)
             break;
           case "ArrowLeft":
+          case "a":
             this.selectNextLayerOrder(-1)
             break;
+          case "e":
+            this.zoomIn()
+            break
+          case "q":
+            this.zoomOut()
+            break
           default:
             caught = false;
         }
