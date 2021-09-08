@@ -114,14 +114,24 @@ export function iTexOfPlane(plane) {
 }
 
 export function tensorTextureGl(tensor) {
-  let actExpanded = tf.depthToSpace(tf.expandDims(tf.tile(tf.transpose(tensor, [2, 0, 1]).reverse(1).reverse(2), [4, 1, 1]), 0), 2, 'NCHW')
+  let actExpanded = tf.depthToSpace(tf.expandDims(tf.tile(tf.transpose(tensor, [2, 0, 1]), [4, 1, 1]), 0), 2, 'NCHW')
   // decodeTensor(actExpanded)
   const tensInternal = tensorInternalTexture(actExpanded)
   return tensInternal
 }
 
+export function tensorTextureGlRGB(tensor) {
+  let expanded = tf.concat([tf.div(imagenetUnPreprocess(tensor), 255), tf.fill([tensor.shape[0], tensor.shape[1], 1], 1)], 2)
+  const tensInternal = decodedInternalTexture(expanded)
+  return tensInternal
+}
+
 export function debatchShape(shape) {
-  return [shape[1], shape[2], shape[3]]
+  const result = []
+  for (let i = 1; i < shape.length; i++) {
+    result.push(shape[i])
+  }
+  return result
 }
 
 export function tensorThreeTextureGl(tensor) {
@@ -137,6 +147,14 @@ export function showActivationPlane(activation, plane) {
   const texInternal = iTexOfPlane(plane)
   // console.log(actExpanded.shape)
   commonCopyTexture(tensInternal, texInternal, activation.shape[0], activation.shape[1])
+}
+
+
+export function showActivationPlaneRGB(activation, plane) {
+  const tensInternal = tensorTextureGlRGB(activation)
+  const texInternal = iTexOfPlane(plane)
+  // console.log(actExpanded.shape)
+  commonCopyTexture(tensInternal, texInternal, activation.shape[0], activation.shape[1], true)
 }
 
 export function showActivationAcrossPlanes(activation, planes, channelsLast = false, rgb = false) {
@@ -213,7 +231,7 @@ export function tensorThreeTexture(tensor, useInt = false) { // @SWITCHY
   if (tensor.shape.length !== 3) {
     throw new Error(`image tensor needs to have 3 dims, is shape ${JSON.stringify(tensor.shape)}`)
   }
-  const textureFormat = [null, THREE.LuminanceFormat, null, THREE.RGBFormat, THREE.RGBAFormat][tensor.shape[tensor.shape.length - 1]]
+  const textureFormat = [null, THREE.LuminanceFormat, null, THREE.RGBAFormat, THREE.RGBAFormat][tensor.shape[tensor.shape.length - 1]]
   // console.log(tensor.shape[tensor.shape.length - 1], textureFormat)
   let texture;
   tfMode()
@@ -257,18 +275,20 @@ export async function tensorImagePlane(tensor, opacity = 1) {
 }
 
 export function tensorToArray(tensor) {
-  const decoded = tensorInternalTexture(tensor)
-  // const decoded = decodedInternalTexture(tensor)
+  const ttastime = performance.now()
+  // const decoded = tensorInternalTexture(tensor)
+  const decoded = decodedInternalTexture(tensor)
   console.log(tensor)
   console.log(decoded)
   const arr = new Float32Array(tensor.size)
   const size = tensor.shape.reduce((a, b) => a * b)
-  const flatSize = Math.ceil(size / 4)
+  const flatSize = Math.ceil(tensor.size / 4)
   const w = Math.ceil(Math.sqrt(flatSize))
   const h = Math.ceil(flatSize / w)
   withAsFramebuffer(gl, decoded, w, h, () => {
-    gl.readPixels(0, 0, w, h, gl.RGBA, gl.FLOAT, arr)
+    gl.readPixels(0, 0, w, h - 1, gl.RGBA, gl.FLOAT, arr)
   })
+  console.log("tensortoarray took", performance.now() - ttastime)
   return arr
 }
 
@@ -285,6 +305,7 @@ export function doubleSidedPlane(texture, opacity = 1) {
   const plane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material)
   plane.frustumCulled = false
   plane.rotateY(Math.PI)
+  plane.rotateZ(Math.PI)
   return plane
 }
 

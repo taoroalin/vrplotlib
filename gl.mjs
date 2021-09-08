@@ -8,7 +8,13 @@ export function copyTexture(gl, input, output, width, height, rgb = false) {
   twgl.bindFramebufferInfo(gl, fbi);
   gl.bindTexture(gl.TEXTURE_2D, output)
   // HACK HERE: only copying top corner because that "magically" works with tensorflow internal format
-  gl.copyTexImage2D(gl.TEXTURE_2D, 0, format, 0, 0, width * 2, height * 2, 0);
+  if (rgb) {
+    gl.copyTexImage2D(gl.TEXTURE_2D, 0, format, 0, 0, width, height, 0);
+
+  } else {
+
+    gl.copyTexImage2D(gl.TEXTURE_2D, 0, format, 0, 0, width * 2, height * 2, 0);
+  }
   // gl.generateMipmap(gl.TEXTURE_2D)
   gl.bindFramebuffer(gl.FRAMEBUFFER, null)
   // console.log(`copytexture took ${performance.now() - stime}`)

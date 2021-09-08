@@ -8,12 +8,16 @@ import { Text } from 'troika-three-text'
 export class NetVis {
   // when I add the ability to modify activations, I'll do it by 
   static async create(world, canvas, config) {
+    const extens = tf.stack([tf.add(tf.range(0, 50176).reshape([224, 224]), 1000000), tf.add(tf.range(0, 50176).reshape([224, 224]), 2000000), tf.add(tf.range(0, 50176).reshape([224, 224]), 3000000)], 2)
+    console.log("extens", extens)
+    const rtens = common.tensorToArray(extens)
+    console.log("rtens", rtens)
+    const stime = performance.now()
+    const asdf = extens.dataSync()
+    console.log("datasync took", performance.now() - stime)
+    common.tensorToArray(extens)
 
-    const testtens = tf.tensor([[1, 2, 3], [5, 6, 7]])
-    console.log(testtens)
-    // const arr = common.tensorToArray(testtens)
-    // console.log("ARRAY", arr)
-
+    console.log("asdf", asdf)
     const thiss = new NetVis()
     await thiss.init(world, canvas, config)
     return thiss
@@ -43,7 +47,7 @@ export class NetVis {
     world.add(this.group)
     this.group.position.z -= 8
     this.group.position.x = 0
-    this.group.position.y = 0
+    this.group.position.y = 0.4
 
     this.activationsGroup = new THREE.Group()
     this.activationsGroup.name = "activations"
@@ -116,13 +120,13 @@ export class NetVis {
     this.selectedPlaneIndex = 0
     this.selectedPixel = [0, 0]
 
-    this.inputPlane = await tensorImagePlane(this.inputTensor.slice([0, 0, 0, 0], [1, -1, -1, 1]).squeeze(0), true)
-    this.inputPlane.scale.x = this.inputShape[1] * this.widthScale * 0.2
-    this.inputPlane.scale.y = this.inputShape[1] * this.widthScale * 0.2
-    this.inputPlane.scale.z = this.inputShape[1] * this.widthScale * 0.2
+    this.inputPlane = await tensorImagePlane(this.inputTensor.squeeze(0), true)
+    this.inputPlane.scale.x = this.inputShape[1] * this.widthScale * 0.3
+    this.inputPlane.scale.y = this.inputShape[1] * this.widthScale * 0.3
+    this.inputPlane.scale.z = this.inputShape[1] * this.widthScale * 0.3
     this.inputPlane.position.z = 0
+    // this.inputPlane.position.y = -3
     this.inputPlane.position.y = -3
-    this.inputPlane.position.x = -0.5
     this.inputPlane.rotateY(Math.PI)
     this.inputPlane.rotateZ(-Math.PI * 0.5)
     this.group.add(this.inputPlane)
@@ -193,20 +197,6 @@ export class NetVis {
 
   }
 
-  async display_old() {
-    tf.tidy(() => {
-      showActivationAcrossPlanes(this.inputTensor, [this.inputPlane], this.channelsLast, true)
-      for (let i = 0; i < this.activationTensors.length; i++) {
-        const activation = this.activationTensors[i]
-        const planes = this.activationPlaneGroups[i]
-        showActivationAcrossPlanes(tf.mul(activation, 2), planes, this.channelsLast)
-      }
-    })
-    // layer 0 supposed tpo be mean 0.6 variance 10,000
-    // this.activationTensors[0].data().then(x => console.log("activation 1", x))
-    // this.activationTensors[10].data().then(x => console.log("activation 10", x))
-  }
-
   createText(text, size = 1) {
     const result = new Text()
     result.text = text
@@ -224,7 +214,7 @@ export class NetVis {
     const layersGroup = this.group.getObjectByName('activations')
     let xposition = 0;
     let skipped = false
-    common.showActivationPlane(this.inputTensor.squeeze(0).slice([0, 0, 0], [-1, -1, 1]), this.inputPlane)
+    common.showActivationPlaneRGB(this.inputTensor.squeeze(0), this.inputPlane)
     for (let layerName in this.spec.layers) {
       if (layerName === "predictions") continue
       if (!skipped) {
@@ -302,7 +292,7 @@ export class NetVis {
         }
         if (this.spec.cameraLocked && this.spec.focusedLayer == layerName) {
           this.world.position.x = -xposition + 4
-          this.inputPlane.position.x = xposition - 4
+          this.inputPlane.position.x = xposition - 4 - 0.5
         }
       } else {
         layerGroup.visible = false;
