@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from './OrbitControls.js';
 import { VRButton } from './VRAuto.js';
 import { XRControllerModelFactory } from './example-webxr/XRControllerModelFactory.mjs';
+import { imageNames } from "./autogen"
 
 import { imagePlane, setRendererAndTf, tfMode, threeMode } from "./common.mjs";
 
@@ -46,7 +47,7 @@ const tempfn = async () => {
   //   world.add(object)
   //   object.position.add(new THREE.Vector3(1, 1, 1))
   // })
-  visualization = await NetVis.create(world, canvas, { models: "./models", name: "ResNet50", input: "n01514668_cock.jpeg", images: "./imagenet", deepdream: "./deepdream" })
+  visualization = await NetVis.create(world, canvas, { models: "./models", name: "ResNet50", input: 0, images: "./imagenet", imageNames: imageNames, deepdream: "./deepdream" })
   window.vis = visualization
   // visualization = await NetVis.create(world, { url: "https://tfhub.dev/google/tfjs-model/imagenet/inception_v2/feature_vector/3/default/1" })
   animate();
@@ -264,7 +265,7 @@ function grabMovement() {
   grabposLeft = controllerLeft.position.clone()
   grabposRight = controllerRight.position.clone()
 }
-
+let visOut = {}
 function render() {
   twgl.resizeCanvasToDisplaySize(canvas)
   threeMode()
@@ -275,8 +276,11 @@ function render() {
 
   const inputs = { controllerLeft, controllerRight, buttons, prevButtons, axes }
   if (visualization) {
-    visualization.update(inputs)
+    visOut = visualization.update(inputs)
   }
-  renderer.render(scene, camera);
+  if (!visOut.noRender) {
+    renderer.render(scene, camera);
+    tfMode()
+  }
   prevButtons = JSON.parse(JSON.stringify(buttons))
 }

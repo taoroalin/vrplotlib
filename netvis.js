@@ -8,6 +8,13 @@ import { Text } from 'troika-three-text'
 export class NetVis {
   // when I add the ability to modify activations, I'll do it by 
   static async create(world, canvas, config) {
+
+    const thiss = new NetVis()
+    await thiss.init(world, canvas, config)
+    return thiss
+  }
+
+  testysfutts() {
     const extens = tf.stack([tf.add(tf.range(0, 50176).reshape([224, 224]), 1000000), tf.add(tf.range(0, 50176).reshape([224, 224]), 2000000), tf.add(tf.range(0, 50176).reshape([224, 224]), 3000000)], 2)
     console.log("extens", extens)
     const rtens = common.tensorToArray(extens)
@@ -18,9 +25,6 @@ export class NetVis {
     common.tensorToArray(extens)
 
     console.log("asdf", asdf)
-    const thiss = new NetVis()
-    await thiss.init(world, canvas, config)
-    return thiss
   }
 
   async init(world, canvas, config) {
@@ -31,12 +35,13 @@ export class NetVis {
     this.channelsLast = false;
     this.uniformFilterSize = 2
 
-    this.spec = { layers: {}, zoom: 0, injected: {}, input: config.input, name: config.name, cameraLocked: true, }
+    this.spec = { layers: {}, zoom: 0, injected: {}, input: config.input, name: config.name, imageNames: config.imageNames, cameraLocked: true, }
 
     this.dirs = { models: config.models, images: config.images, deepdream: config.deepdream }
     const url = this.dirs.models + "/" + this.spec.name + "/model.json"
     this.dreamurl = this.dirs.deepdream + `/filter/${this.spec.name}/`
     this.dreamcache = {}
+    this.inputcache = {}
     console.log(url)
 
     const model = await tf.loadLayersModel(url)
@@ -114,23 +119,21 @@ export class NetVis {
     this.activationTensors = {}
     this.delay = 4
     this.lastUpdate = -9999999999
-
-    this.inputTensor = (await this.getImageTensor(this.spec.input)).resizeBilinear([this.inputShape[1], this.inputShape[2]])
+    // await Promise.all(this.spec.imageNames.map((x) => this.getImageTensor(x)))
+    this.inputTensor = await this.getImageTensor(this.spec.imageNames[this.spec.input])
+    // console.log("it", this.inputTensor.dataSync())
     this.selectedActivationIndex = 0
     this.selectedPlaneIndex = 0
     this.selectedPixel = [0, 0]
 
     this.inputPlane = await tensorImagePlane(this.inputTensor.squeeze(0), true)
-    this.inputPlane.scale.x = this.inputShape[1] * this.widthScale * 0.3
-    this.inputPlane.scale.y = this.inputShape[1] * this.widthScale * 0.3
-    this.inputPlane.scale.z = this.inputShape[1] * this.widthScale * 0.3
+    this.inputPlane.scale.x = this.inputShape[1] * this.widthScale * 0.5
+    this.inputPlane.scale.y = this.inputShape[1] * this.widthScale * 0.5
+    this.inputPlane.scale.z = this.inputShape[1] * this.widthScale * 0.5
     this.inputPlane.position.z = 0
     // this.inputPlane.position.y = -3
     this.inputPlane.position.y = -3
-    this.inputPlane.rotateY(Math.PI)
-    this.inputPlane.rotateZ(-Math.PI * 0.5)
     this.group.add(this.inputPlane)
-
 
     this.setupListeners()
 
@@ -170,9 +173,14 @@ export class NetVis {
   }
 
   async getImageTensor(name) {
+    if (this.inputcache[name] !== undefined) {
+      return tf.add(this.inputcache[name], 0)
+    }
     const url = this.dirs.images + "/" + name
     const t = await imgUrlToTensor(url)
-    return t.resizeBilinear([this.inputShape[1], this.inputShape[2]])
+    const result = t
+    this.inputcache[name] = result
+    return tf.add(result, 0)
   }
 
   //@STUCK I don't know of a way to alter the middle of a compute graph in tfjs
@@ -313,6 +321,10 @@ export class NetVis {
     }
     this.activationTensors = {}
     const pstime = performance.now()
+    console.log("inputtensor")
+    this.inputTensor.print()
+    common.tfMode()
+
     const at = this.model.predict(this.inputTensor)
     for (let i = 0; i < this.model.outputs.length; i++) {
       const output = this.model.outputs[i]
@@ -320,6 +332,7 @@ export class NetVis {
     }
     console.log(this.activationTensors)
     this.probs = at[this.model.outputs.length - 1]
+    at[1].print()
     const dstime = performance.now()
     this.probs.data().then(probsArray => {
       // const arr = common.tensorToArray(this.probs)
@@ -353,6 +366,7 @@ export class NetVis {
       this.display()
       this.visualDirty = false
     }
+    return {}
   }
 
   selectNextLayerOrder(t) {
@@ -389,6 +403,7 @@ export class NetVis {
     this.spec.zoom -= 1
     this.setToDisplay()
   }
+
   setToDisplay() {
     this.visualDirty = true
   }
@@ -397,8 +412,15 @@ export class NetVis {
     this.activationsDirty = true
   }
 
+  async cycleInputs(x) {
+    this.spec.input = Math.min(Math.max(this.spec.input + x, 0), this.spec.imageNames.length - 1)
+    this.inputTensor = await this.getImageTensor(this.spec.imageNames[this.spec.input])
+    console.log("inputTensor", this.inputTensor.dataSync())
+    this.setToRecalculate()
+  }
+
   setupListeners() {
-    document.addEventListener("keydown", (event) => {
+    document.addEventListener("keydown", async (event) => {
       let caught = true
       if (event.ctrlKey) {
         switch (event.key) {
@@ -444,6 +466,24 @@ export class NetVis {
             break
           case "q":
             this.zoomOut()
+            break
+          case "n":
+            console.log(this)
+            await this.cycleInputs(-1)
+            // await new Promise(resolve => setTimeout(resolve, 50))
+            break
+          case "m":
+            await this.cycleInputs(1)
+            break
+          case "r":
+            this.setToRecalculate()
+            break
+          case "b":
+            const varsy = tf.tensor(new Float32Array(10000), [10000], 'float32')
+            console.log(varsy)
+            break
+          case "g":
+            this.getImageTensor(this.spec.imageNames[this.spec.input])
             break
           default:
             caught = false;

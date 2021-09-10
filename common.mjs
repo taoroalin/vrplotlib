@@ -34,11 +34,9 @@ export function glMode() {
   whichState = "gl"
 }
 
-export function commonCopyTexture(from, to, width, height, alpha) {
-  copyTexture(gl, from, to, width, height, alpha)
-}
-
 export function tfMode() {
+  renderer.resetState()
+
   if (playModesSafe || whichState !== 'tf') {
     if (gpgpu.framebuffer) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, gpgpu.framebuffer)
@@ -50,16 +48,11 @@ export function tfMode() {
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gpgpu.indexBuffer);
       bindVertexProgramAttributeStreams(gl, gpgpu.program, gpgpu.vertexBuffer);
     }
+    // if (gpgpu.outputTexture) {
+    //   gl.bindTexture(gl.TEXTURE_2D, gpgpu.outputTexture)
+    // }
   }
   whichState = 'tf'
-}
-
-export function clamp(x, min, max) {
-  return Math.min(Math.max(x, min), max)
-}
-
-export function lerp(x, min, max) {
-  return min + (max - min) * x
 }
 
 export async function threeMode() {
@@ -70,22 +63,70 @@ export async function threeMode() {
   whichState = 'three'
 }
 
+export function readGlState() {
+
+}
+
+export function commonCopyTexture(from, to, width, height, alpha) {
+  copyTexture(gl, from, to, width, height, alpha)
+}
+
+export function clamp(x, min, max) {
+  return Math.min(Math.max(x, min), max)
+}
+
+export function lerp(x, min, max) {
+  return min + (max - min) * x
+}
 
 export async function imgUrlToTensor(url) {
   const img = document.createElement("img")
   img.width = 224
   img.height = 224
   img.src = url
+  // gl.clearColor(0, 0, 0, 1);
+  // gl.clear(gl.COLOR_BUFFER_BIT);
+  // return tf.randomUniform([1, 224, 224, 3], -100, 100)
   const result = await (new Promise((resolve) => {
     img.onload = () => {
-      const tensor = tf.browser.fromPixels(img, 3)
-      const shaped = imagenetPreprocess(tensor.expandDims(0))
+      let batched = tf.tidy(() => {
+        const tensor = tf.browser.fromPixels(img)
+        // resolve(tf.randomUniform([1, 224, 224, 3], -100, 100))
+        // return
+        // tensor.print()
+        const shaped = imagenetPreprocess(tensor)
+        // shaped.print()
+        return tf.expandDims(shaped, 0)
+      })
+      // batched.print()
       // const shaped = tf.reverse(tf.add(tf.mul(tensor.expandDims(0), 1 / 127.5), -1), -1)
-      resolve(shaped)
+      resolve(batched)
     }
   }))
   return result
 }
+
+function imgElToTensor(imgEl) {
+  let rawArr;
+  const width = imgEl.width, height = imgEl.height
+  const ctx2d = document.createElement("canvas").getContext("2d")
+  ctx2d.canvas.height = height
+  ctx2d.canvas.width = width
+  ctx2d.drawImage(imgEl, 0, 0, width, height)
+  rawArr = new Float32Array(new Int32Array(ctx2d.getImageData(0, 0, width, height).data))
+  // return tf.randomUniform([width, height, 3], -100, 100)
+  // const tensor = tf.add(tf.fill([width, height, 4], 1, 'float32'), 0)
+  tfMode()
+  const tensor = tf.tensor(rawArr, [width, height, 4])
+  const tensor3Chans = tf.slice(tensor, [0, 0, 0], [-1, -1, 3])
+  let result = tensor3Chans
+  for (let i = 0; i < 10; i++) {
+    result = tf.add(result, 0)
+  }
+  // tensor3Chans.print()
+  return result
+}
+
 
 export function dispose(tensor) {
   backend.disposeData(tensor.dataId)
@@ -255,7 +296,7 @@ export function arrayTexture(arr, width, height) {
 // models are imported from tf.keras.applications
 // preprocessing from https://github.com/keras-team/keras/blob/master/keras/applications/imagenet_utils.py
 export function imagenetPreprocess(tensor) {
-  return tf.reverse(tf.sub(tensor, 95), -1)
+  return tf.reverse(tf.add(tensor, -95), -1)
 }
 
 export function imagenetUnPreprocess(tensor) {

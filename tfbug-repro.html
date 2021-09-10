@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+
+<head>
+    <script type="module">
+        import * as common from "./common"
+
+
+        import * as tf from "@tensorflow/tfjs"
+        import { setWebGLContext } from "@tensorflow/tfjs-backend-webgl";
+        import * as THREE from "three"
+        const main = async () => {
+            const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+
+            const gl = renderer.getContext()
+            setWebGLContext(2, gl);
+            tf.setBackend('webgl')
+            common.setRendererAndTf(renderer)
+
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+            const geometry = new THREE.BoxGeometry();
+            const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+            const cube = new THREE.Mesh(geometry, material);
+            scene.add(cube);
+
+            camera.position.z = 5;
+            const render = () => renderer.render(scene, camera);
+            common.threeMode()
+            render()
+            renderer.resetState()
+            // common.tfMode(true)
+
+            const shape = [224, 224, 4]
+            const size = shape.reduce((a, b) => a * b)
+            console.log("uploaded")
+            for (let i = 0; i < 5; i++) {
+                const array = new Float32Array(size)
+                for (let i = 0; i < size; i++) {
+                    array[i] = i
+                }
+                const tensor = tf.tensor(array, shape)
+                console.log("new tensor", tensor.dataSync())
+                const operatedOn = tf.add(tensor, 0)
+                console.log("operated on tensor", operatedOn.dataSync())
+            }
+            console.log("generated")
+            for (let i = 0; i < 5; i++) {
+                const tensor = tf.fill(shape, 1)
+                console.log("new tensor", tensor.dataSync())
+                const operatedOn = tf.add(tensor, 0)
+                console.log("operated on tensor", operatedOn.dataSync())
+            }
+        }
+        main()
+    </script>
+</head>
+
+<body>
+</body>
