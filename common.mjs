@@ -139,6 +139,9 @@ export async function toUint8Array(tensor) {
 export function tensorInternalTexture(tensor) {
   const texData = tf.backend().texData.get(tensor.dataId)
   const tex = texData.texture
+  if (!tex) {
+    throw new Error(`cpu tensor doesn't have internal texture`)
+  }
   return tex
 }
 
@@ -161,6 +164,12 @@ export function tensorTextureGl(tensor) {
   return tensInternal
 }
 
+export function tensorTextureGl2(tensor) {
+  let expanded = tf.concat([tf.tile(tensor, [1, 1, 3]), tf.fill([tensor.shape[0], tensor.shape[1], 1], 1)], 2)
+  const tensInternal = decodedInternalTexture(expanded)
+  return tensInternal
+}
+
 export function tensorTextureGlRGB(tensor) {
   let expanded = tf.concat([tf.div(imagenetUnPreprocess(tensor), 255), tf.fill([tensor.shape[0], tensor.shape[1], 1], 1)], 2)
   const tensInternal = decodedInternalTexture(expanded)
@@ -176,7 +185,7 @@ export function debatchShape(shape) {
 }
 
 export function tensorThreeTextureGl(tensor) {
-  const tex = tensorTextureGl(tensor)
+  const tex = tensorTextureGl2(tensor)
   const threeTex = new THREE.Texture()
   const internals = renderer.properties.get(threeTex)
   internals.__webglTexture = tex
@@ -184,12 +193,11 @@ export function tensorThreeTextureGl(tensor) {
 }
 
 export function showActivationPlane(activation, plane) {
-  const tensInternal = tensorTextureGl(activation)
+  const tensInternal = tensorTextureGl2(activation)
   const texInternal = iTexOfPlane(plane)
   // console.log(actExpanded.shape)
-  commonCopyTexture(tensInternal, texInternal, activation.shape[0], activation.shape[1])
+  commonCopyTexture(tensInternal, texInternal, activation.shape[0], activation.shape[1], true)
 }
-
 
 export function showActivationPlaneRGB(activation, plane) {
   const tensInternal = tensorTextureGlRGB(activation)
@@ -200,48 +208,46 @@ export function showActivationPlaneRGB(activation, plane) {
 
 export function showActivationAcrossPlanes(activation, planes, channelsLast = false, rgb = false) {
   if (channelsLast) {
-    tf.tidy(() => {
-      activation = tf.mul(tf.squeeze(activation), 0.5)
-      const shape = activation.shape
-      if (rgb) {
-        let activationPadded = activation
-        if (activation.shape[2] < planes.length) {
-          activationPadded = tf.concat([activation, tf.zeros([activation.shape[0], activation.shape[1], planes.length * 3 - activation.shape[2]])], 2)
-        } else if (activation.shape[2] > planes.length) {
-          activationPadded = tf.slice(activation, [0, 0, 0], [activation.shape[0], activation.shape[1], planes.length * 3])
-        }
-        const layers = tf.split(tf.transpose(activationPadded, [2, 0, 1]), planes.length, 0)
-        //.map(t => tf.concat([t, tf.ones([shape[0], shape[1], 1])], 2))
-        for (let i = 0; i < planes.length; i++) {
-          const plane = planes[i]
-          const texInternal = iTexOfPlane(plane)
-          if (!texInternal) continue;
-          const layer = layers[i]
-          decodeTensor(layer)
-          console.log("copying rgb")
-          // const colors = tf.split(layer, 3, 0)
-          console.log(layer.shape)
-          let layerExpanded = tf.depthToSpace(tf.expandDims(tf.pad(layer, [[0, 1], [0, 0], [0, 0]], 255)), 2, 'NCHW')
-          console.log(layerExpanded.shape)
-          console.log("printing rgb")
-          const tensInternal = tensorInternalTexture(layerExpanded)
-          commonCopyTexture(tensInternal, texInternal, shape[0] * 2, shape[1] * 2, true)
-        }
-      } else {
-        const layers = tf.split(tf.transpose(tf.slice(activation, [0, 0, 0], [activation.shape[0], activation.shape[1], planes.length]), [2, 0, 1]), planes.length, 0)
-        for (let i = 0; i < planes.length; i++) {
-          const plane = planes[i]
-          const texInternal = iTexOfPlane(plane)
-          if (!texInternal) continue;
-          const layer = layers[i]
-          let layerExpanded = tf.depthToSpace(tf.expandDims(tf.tile(layer, [4, 1, 1]), 0), 2, 'NCHW')
-          // decodeTensor(layerExpanded)
-          const tensInternal = tensorInternalTexture(layerExpanded)
-          // console.log(layerExpanded.shape)
-          commonCopyTexture(tensInternal, texInternal, shape[0], shape[1])
-        }
+    activation = tf.mul(tf.squeeze(activation), 0.5)
+    const shape = activation.shape
+    if (rgb) {
+      let activationPadded = activation
+      if (activation.shape[2] < planes.length) {
+        activationPadded = tf.concat([activation, tf.zeros([activation.shape[0], activation.shape[1], planes.length * 3 - activation.shape[2]])], 2)
+      } else if (activation.shape[2] > planes.length) {
+        activationPadded = tf.slice(activation, [0, 0, 0], [activation.shape[0], activation.shape[1], planes.length * 3])
       }
-    })
+      const layers = tf.split(tf.transpose(activationPadded, [2, 0, 1]), planes.length, 0)
+      //.map(t => tf.concat([t, tf.ones([shape[0], shape[1], 1])], 2))
+      for (let i = 0; i < planes.length; i++) {
+        const plane = planes[i]
+        const texInternal = iTexOfPlane(plane)
+        if (!texInternal) continue;
+        const layer = layers[i]
+        decodeTensor(layer)
+        console.log("copying rgb")
+        // const colors = tf.split(layer, 3, 0)
+        console.log(layer.shape)
+        let layerExpanded = tf.depthToSpace(tf.expandDims(tf.pad(layer, [[0, 1], [0, 0], [0, 0]], 255)), 2, 'NCHW')
+        console.log(layerExpanded.shape)
+        console.log("printing rgb")
+        const tensInternal = tensorInternalTexture(layerExpanded)
+        commonCopyTexture(tensInternal, texInternal, shape[0] * 2, shape[1] * 2, true)
+      }
+    } else {
+      const layers = tf.split(tf.transpose(tf.slice(activation, [0, 0, 0], [activation.shape[0], activation.shape[1], planes.length]), [2, 0, 1]), planes.length, 0)
+      for (let i = 0; i < planes.length; i++) {
+        const plane = planes[i]
+        const texInternal = iTexOfPlane(plane)
+        if (!texInternal) continue;
+        const layer = layers[i]
+        let layerExpanded = tf.depthToSpace(tf.expandDims(tf.tile(layer, [4, 1, 1]), 0), 2, 'NCHW')
+        // decodeTensor(layerExpanded)
+        const tensInternal = tensorInternalTexture(layerExpanded)
+        // console.log(layerExpanded.shape)
+        commonCopyTexture(tensInternal, texInternal, shape[0], shape[1])
+      }
+    }
   }
 }
 
@@ -309,8 +315,8 @@ function normalizeImage(tensor, means, stds) {
   return tf.div(tf.sub(tensor, subtensor), divtensor)
 }
 
-export async function tensorImagePlane(tensor, opacity = 1) {
-  const texture = tensorThreeTexture(tensor)
+export function tensorImagePlane(tensor, opacity = 1) {
+  const texture = tensorThreeTextureGl(tensor)
   const plane = doubleSidedPlane(texture, opacity)
   return plane
 }
@@ -406,4 +412,17 @@ function bindVertexProgramAttributeStreams(
 export function actStats(activation) {
   const { mean, variance } = tf.moments(activation)
   return { mean: mean.dataSync()[0], variance: variance.dataSync()[0] }
+}
+
+export function getLastLayerSlice(tensor, idx) {
+  const starts = tensor.shape.map(x => 0)
+  starts[starts.length - 1] = idx
+  const sizes = tensor.shape.map(x => -1)
+  sizes[sizes.length - 1] = 1
+  return tf.slice(tensor, starts, sizes)
+}
+
+export function normalize(tensor) {
+  const { mean, variance } = tf.moments(tensor)
+  return tf.batchNorm(tensor, mean, variance)
 }

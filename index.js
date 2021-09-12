@@ -11,6 +11,7 @@ import { NetVis } from "./netvis.mjs";
 
 import { setWebGLContext } from "@tensorflow/tfjs-backend-webgl";
 import * as tf from "@tensorflow/tfjs";
+
 let enableVRImmediately = false;
 
 let visualization;
@@ -33,11 +34,15 @@ let rotpoint;
 
 let glContext;
 
+let glCalls = []
+
 
 const config = { moveScale: true }
 
 let prevButtons = { left: {}, right: {} }
 let buttons, axes;
+
+let interceptGlCalls = false
 
 const tempfn = async () => {
 
@@ -59,9 +64,36 @@ window.addEventListener('vrdisplayactivate', function () {
 });
 
 async function init() {
-
+  // const extCanvas = document.createElement("canvas")
+  // glContext = extCanvas.getContext("webgl2")
+  function interceptMethodCalls(obj, fn) {
+    return new Proxy(obj, {
+      get(target, prop) { // (A)
+        if (typeof obj[prop] === 'function') {
+          obj[prop].bind(obj)
+          return new Proxy(obj[prop], {
+            apply: (target, thisArg, argumentsList) => { // (B)
+              fn(prop, argumentsList);
+              return Reflect.apply(target, obj, argumentsList);
+            }
+          });
+        } else {
+          return Reflect.get(obj, prop);
+        }
+      }
+    });
+  }
+  const glInterceptor = (prop, argList) => {
+    glCalls.push([prop, argList])
+    // console.log("gl called", prop, argList)
+  }
   renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
   glContext = renderer.getContext()
+  if (interceptGlCalls) {
+    glContext = interceptMethodCalls(glContext, glInterceptor)
+    console.log(glCalls)
+    renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', context: glContext });
+  }
   setWebGLContext(2, glContext);
   await tf.setBackend('webgl');
   setRendererAndTf(renderer)
@@ -110,14 +142,13 @@ async function init() {
   light.shadow.mapSize.set(4096, 4096);
   world.add(light);
 
-
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.shadowMap.enabled = true;
   renderer.xr.enabled = true;
-  container.appendChild(renderer.domElement);
-  canvas = renderer.domElement
+  container.appendChild(glContext.canvas);
+  canvas = glContext.canvas
 
   document.body.appendChild(VRButton.createButton(renderer, enableVRImmediately));
 
@@ -267,6 +298,7 @@ function grabMovement() {
 }
 let visOut = {}
 function render() {
+  glCalls = []
   twgl.resizeCanvasToDisplaySize(canvas)
   threeMode()
 
@@ -283,4 +315,5 @@ function render() {
     tfMode()
   }
   prevButtons = JSON.parse(JSON.stringify(buttons))
+  if (interceptGlCalls) console.log(glCalls)
 }

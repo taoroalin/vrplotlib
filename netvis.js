@@ -5,8 +5,10 @@ import * as tf from "@tensorflow/tfjs";
 import * as mobilenet from "@tensorflow-models/mobilenet"
 import { imagenetLabels } from "./labels"
 import { Text } from 'troika-three-text'
+
+// MEMORY MANAGEMENT
+// this file uses tf.tidy on the outermost scope of every JS invocation, so everything is deleted by default. If you want to keep something between frames, use tf.keep on it
 export class NetVis {
-  // when I add the ability to modify activations, I'll do it by 
   static async create(world, canvas, config) {
 
     const thiss = new NetVis()
@@ -42,6 +44,7 @@ export class NetVis {
     this.dreamurl = this.dirs.deepdream + `/filter/${this.spec.name}/`
     this.dreamcache = {}
     this.inputcache = {}
+    this.saliencyCache = {}
     console.log(url)
 
     const model = await tf.loadLayersModel(url)
@@ -60,6 +63,7 @@ export class NetVis {
 
     this.topPredictions = []
     this.outputLayers = []
+    this.outputLayersDict = {}
     for (let layer of model.layers) {
       if (layer.name.match(/conv\d?d?$/) && !layer.name.match(/bn$/)) {
         if (!this.channelsLast && layer.dataFormat === "channelsLast") {
@@ -67,6 +71,7 @@ export class NetVis {
         }
         const symTensor = layer.outboundNodes[0].outputTensors[0]
         this.outputLayers.push(symTensor)
+        this.outputLayersDict[this.actName(symTensor)] = symTensor
       }
     }
     const modelspec = { inputs: model.inputs, outputs: [...this.outputLayers, model.outputs[0]] }
@@ -75,7 +80,8 @@ export class NetVis {
     this.inputShape[0] = 1
 
     for (let output of this.model.outputs) {
-      this.spec.layers[this.actName(output)] = { show: true, fv: false, shownFilters: [1], focusedFilter: 1, shape: output.shape, _: {} }
+      const layerName = this.actName(output)
+      this.spec.layers[layerName] = { name: layerName, show: true, dream: true, saliency: true, shownFilters: [1], focusedFilter: 1, shape: output.shape, _: {} }
     }
     this.spec.focusedLayer = Object.keys(this.spec.layers)[0]
 
@@ -126,7 +132,7 @@ export class NetVis {
     this.selectedPlaneIndex = 0
     this.selectedPixel = [0, 0]
 
-    this.inputPlane = await tensorImagePlane(this.inputTensor.squeeze(0), true)
+    this.inputPlane = tensorImagePlane(this.inputTensor.squeeze(0), true)
     this.inputPlane.scale.x = this.inputShape[1] * this.widthScale * 0.5
     this.inputPlane.scale.y = this.inputShape[1] * this.widthScale * 0.5
     this.inputPlane.scale.z = this.inputShape[1] * this.widthScale * 0.5
@@ -140,6 +146,72 @@ export class NetVis {
     console.log(this.spec)
 
     return this
+  }
+
+  getSaliencyPlane(outputName, filterIdx, pixelIdx = undefined) {
+    const key = `${outputName}$${filterIdx}$${pixelIdx}`
+    const cached = this.saliencyCache[key]
+    if (cached !== undefined) {
+      return cached
+    }
+    const tensor = this.getSaliencyTensor(outputName, filterIdx, pixelIdx)
+    tf.keep(tensor)
+
+    const plane = tensorImagePlane(tensor)
+    plane.tensor = tensor
+    plane.name = "saliency"
+    this.saliencyCache[key] = plane
+    return plane
+  }
+
+  // SmoothGrad saliency algorithm
+  getSaliencyTensor(outputName, filterIdx, pixelIdx = undefined) {
+    const batchSize = 10
+    const noiseStd = 10
+
+    const stime = performance.now()
+    const batchShape = this.inputShape.map(x => x)
+    batchShape[0] = batchSize
+    // noise is supposed to be ?? 
+    const noisedBatch = tf.add(tf.randomNormal(batchShape, 0, noiseStd), tf.tile(this.inputTensor, [batchSize, 1, 1, 1]))
+    const inputVariable = tf.variable(noisedBatch);
+
+    // make partial model to avoid computing later layers
+    const partialModel = tf.model({ inputs: this.model.inputs, outputs: [this.outputLayersDict[outputName]] })
+
+    const computeLoss = () => {
+      const activation = partialModel.predict(inputVariable)
+      const filter = common.getLastLayerSlice(activation, filterIdx)
+      console.log("filterShape", filter.shape)
+      const batchMean = tf.mean(filter, 0)
+      let loss = batchMean
+      if (pixelIdx === undefined) {
+        loss = tf.sum(loss)
+      } else {
+
+      }
+      inputVariable.dispose()
+      return loss
+    }
+
+    const { value, grads } = tf.variableGrads(computeLoss, [inputVariable]);
+    const grad = Object.values(grads)[0]
+    const outputRGB = false
+
+    let result
+    if (outputRGB) {
+
+    } else {
+      result = tf.mean(tf.log(tf.abs(grad)), [0, 3]).expandDims(2)
+    }
+
+    console.log(result.shape, "result shape")
+    // console.log("saliency max", max.dataSync())
+    result = tf.mul(common.normalize(result), 40)
+    console.log("normalized", result.shape)
+    console.log("saliency took", performance.now() - stime)
+    // console.log(result.dataSync())
+    return result
   }
 
   getScale(shape) {
@@ -161,6 +233,7 @@ export class NetVis {
       if (plane) {
         plane.name = "dream"
         plane.filter = idx
+        plane.rotateZ(Math.PI)
       }
       this.dreamcache[cachename] = plane
       return plane
@@ -174,13 +247,13 @@ export class NetVis {
 
   async getImageTensor(name) {
     if (this.inputcache[name] !== undefined) {
-      return tf.add(this.inputcache[name], 0)
+      return this.inputcache[name]
     }
     const url = this.dirs.images + "/" + name
     const t = await imgUrlToTensor(url)
     const result = t
     this.inputcache[name] = result
-    return tf.add(result, 0)
+    return result
   }
 
   //@STUCK I don't know of a way to alter the middle of a compute graph in tfjs
@@ -217,140 +290,185 @@ export class NetVis {
     return result
   }
 
-  async display() {
-    this.displaying = true
-    const layersGroup = this.group.getObjectByName('activations')
-    let xposition = 0;
-    let skipped = false
-    common.showActivationPlaneRGB(this.inputTensor.squeeze(0), this.inputPlane)
-    for (let layerName in this.spec.layers) {
-      if (layerName === "predictions") continue
-      if (!skipped) {
-        skipped = true;
-        // continue
-      }
-      const layer = this.spec.layers[layerName]
-      if (layer.show) {
-        const layerGroup = layersGroup.getObjectByName(layerName)
-        const filtersGroup = layerGroup.getObjectByName("filters")
-        const output = this.activationTensors[layerName]
-
-        layerGroup.visible = true;
-        const layerShape = common.debatchShape(layer.shape)
-        const scale = this.getScale(layer.shape)
-        const xtaken = scale + scale + this.horizontalSpacing * 2
-        layerGroup.position.x = xposition
-        xposition += xtaken
-        for (let i = filtersGroup.children.length; i < layer.shownFilters.length; i++) {
-          const filterGroup = new THREE.Group()
-          const label = this.createText("i", 2)
-          filterGroup.add(label)
-          label.position.x -= 0.01
-          label.position.y += this.fontSize * 1
-
-          filtersGroup.add(filterGroup)
-          const plane = await tensorImagePlane(tf.zeros(layerShape))
-          filterGroup.add(plane)
-          plane.name = "filter"
-          plane.position.z += i * 0.05
-          plane.scale.x = scale
-          plane.scale.z = scale
-          plane.scale.y = scale
-          plane.position.x = -(scale + this.horizontalSpacing) / 2
+  display() {
+    tf.tidy(() => {
+      this.displaying = true
+      const layersGroup = this.group.getObjectByName('activations')
+      let xposition = 0;
+      let skipped = false
+      common.showActivationPlaneRGB(this.inputTensor.squeeze(0), this.inputPlane)
+      for (let layerName in this.spec.layers) {
+        if (layerName === "predictions") continue
+        if (!skipped) {
+          skipped = true;
+          // continue
         }
-        for (let i = layer.shownFilters.length; i < filtersGroup.children.length; i++) {
-          const plane = filtersGroup.children[i]
-          plane.visible = false
-        }
-        const offset = layer.shownFilters.findIndex(x => x === layer.focusedFilter)
-        const height = scale + this.verticalSpacing
-        let zposition = -height * offset
-        for (let i = 0; i < layer.shownFilters.length; i++) {
-          const filter = layer.shownFilters[i]
-          const filterGroup = filtersGroup.children[i]
-          const filterLabel = filterGroup.getObjectByName("label")
-          filterLabel.text = filter
-          filterLabel.sync()
-          const filterPlane = filterGroup.getObjectByName("filter")
-          const filterTensor = tf.slice(output, [0, 0, 0, filter], [-1, -1, -1, 1]).squeeze(0)
-          filterGroup.position.z = zposition
-          zposition += height
-          // console.log(filterTensor.dataSync())
-          common.showActivationPlane(filterTensor, filterPlane)
-          const oldDream = filterGroup.getObjectByName("dream")
-          if (oldDream && oldDream.filter !== filter) {
-            filterGroup.remove(oldDream)
+        const layer = this.spec.layers[layerName]
+        if (layer.show) {
+          const layerGroup = layersGroup.getObjectByName(layerName)
+          const filtersGroup = layerGroup.getObjectByName("filters")
+          const output = this.activationTensors[layerName]
+
+          layerGroup.visible = true;
+          const layerShape = common.debatchShape(layer.shape)
+          const scale = this.getScale(layer.shape)
+          const xtaken = scale + scale + this.horizontalSpacing * 2
+          layerGroup.position.x = xposition
+          xposition += xtaken
+
+          // create more filter planes if there aren't enough
+          for (let i = filtersGroup.children.length; i < layer.shownFilters.length; i++) {
+            const filterGroup = new THREE.Group()
+            const label = this.createText("i", 2)
+            filterGroup.add(label)
+            label.position.x -= 0.01
+            label.position.y += this.fontSize * 1
+
+            filtersGroup.add(filterGroup)
+            const plane = tensorImagePlane(tf.zeros(layerShape))
+            filterGroup.add(plane)
+            plane.name = "filter"
+            plane.position.z += i * 0.05
+            plane.scale.x = scale
+            plane.scale.z = scale
+            plane.scale.y = scale
+            plane.position.x = -(scale + this.horizontalSpacing) / 2
           }
-          if (!oldDream || oldDream.filter !== filter) {
-            this.getDream(layerName, filter).then(dream => {
-              if (dream) {
-                filterGroup.add(dream)
-                dream.position.x = (scale + this.horizontalSpacing) / 2
-                if (this.uniformFilterSize) {
-                  dream.scale.x = scale
-                  dream.scale.y = scale
-                  dream.scale.z = scale
+          for (let i = layer.shownFilters.length; i < filtersGroup.children.length; i++) {
+            const plane = filtersGroup.children[i]
+            plane.visible = false
+          }
+          const offset = layer.shownFilters.findIndex(x => x === layer.focusedFilter)
+          const height = scale + this.verticalSpacing
+          let zposition = -height * offset
+          for (let i = 0; i < layer.shownFilters.length; i++) {
+            const filter = layer.shownFilters[i]
+            const filterGroup = filtersGroup.children[i]
+            const filterLabel = filterGroup.getObjectByName("label")
+            if (filterLabel.text !== filter) {
+              filterLabel.text = filter
+              filterLabel.sync()
+            }
+
+            const filterPlane = filterGroup.getObjectByName("filter")
+            const filterTensor = tf.slice(output, [0, 0, 0, filter], [-1, -1, -1, 1]).squeeze(0)
+            filterGroup.position.z = zposition
+            zposition += height
+            common.showActivationPlane(filterTensor, filterPlane)
+
+            const oldDream = filterGroup.getObjectByName("dream")
+            if (!oldDream || oldDream.filter !== filter) {
+              if (layer.dream) {
+                this.getDream(layerName, filter).then(dream => {
+                  if (oldDream && oldDream.filter !== filter) {
+                    filterGroup.remove(oldDream)
+                  }
+                  if (dream) {
+                    filterGroup.add(dream)
+                    dream.position.x = (scale + this.horizontalSpacing) / 2
+                    if (this.uniformFilterSize) {
+                      dream.scale.x = scale
+                      dream.scale.y = scale
+                      dream.scale.z = scale
+                    }
+                  }
+                })
+              } else {
+                if (oldDream && oldDream.filter !== filter) {
+                  filterGroup.remove(oldDream)
                 }
               }
-            })
+            }
+
+            if (this.spec.focusedLayer === layerName && layer.saliency) {
+              const plane = this.getSaliencyPlane(layer.name, filter)
+              filterGroup.add(plane)
+              common.showActivationPlane(plane.tensor, plane)
+              plane.position.z += i * 0.05
+              plane.position.y = scale + this.horizontalSpacing
+              plane.scale.x = scale
+              plane.scale.z = scale
+              plane.scale.y = scale
+              plane.position.x = -(scale + this.horizontalSpacing) / 2
+            }
+
+            if (this.spec.cameraLocked && layer.focusedFilter == filter) {
+              this.world.position.z = -zposition
+            }
           }
-          if (this.spec.cameraLocked && layer.focusedFilter == filter) {
-            this.world.position.z = -zposition
+          if (this.spec.cameraLocked && this.spec.focusedLayer == layerName) {
+            this.world.position.x = -xposition + 4
+            this.inputPlane.position.x = xposition - 4 - 0.5
           }
+        } else {
+          layerGroup.visible = false;
         }
-        if (this.spec.cameraLocked && this.spec.focusedLayer == layerName) {
-          this.world.position.x = -xposition + 4
-          this.inputPlane.position.x = xposition - 4 - 0.5
-        }
-      } else {
-        layerGroup.visible = false;
       }
-    }
-    if (this.spec.cameraLocked) {
-      this.world.position.z = this.spec.zoom * 2
-    }
-    this.displaying = false
+      if (this.spec.cameraLocked) {
+        this.world.position.z = this.spec.zoom * 2
+      }
+      this.displaying = false
+    })
   }
 
-  async _update() {
-    const ustime = performance.now()
+  modelPredict(input) {
+    const at = this.model.predict(input)
+    const outputMap = {}
+    for (let i = 0; i < this.model.outputs.length; i++) {
+      const output = this.model.outputs[i]
+      outputMap[this.actName(output)] = at[i]
+    }
+    return outputMap
+  }
+
+  disposeActivationTensors() {
 
     for (let k in this.activationTensors) {
       const t = this.activationTensors[k]
       if (t) t.dispose()
     }
-    this.activationTensors = {}
-    const pstime = performance.now()
-    console.log("inputtensor")
-    this.inputTensor.print()
-    common.tfMode()
+  }
 
-    const at = this.model.predict(this.inputTensor)
-    for (let i = 0; i < this.model.outputs.length; i++) {
-      const output = this.model.outputs[i]
-      this.activationTensors[this.actName(output)] = at[i]
+  keepActivationTensors() {
+    for (let k in this.activationTensors) {
+      const t = this.activationTensors[k]
+      if (t) tf.keep(t)
     }
-    console.log(this.activationTensors)
-    this.probs = at[this.model.outputs.length - 1]
-    at[1].print()
-    const dstime = performance.now()
-    this.probs.data().then(probsArray => {
-      // const arr = common.tensorToArray(this.probs)
-      console.log('data took', performance.now() - dstime)
-      const zipped = []
-      for (let i = 0; i < probsArray.length; i++) {
-        zipped.push([probsArray[i], i])
-      }
-      zipped.sort((a, b) => b[0] - a[0])
+  }
 
-      for (let i = 0; i < 1; i++) {
-        console.log(imagenetLabels[zipped[i][1]])
-      }
+  _update() {
+    tf.tidy(() => {
+      const ustime = performance.now()
+      this.activationTensors = {}
+      const pstime = performance.now()
+      console.log("inputtensor")
+      common.tfMode()
+
+      this.disposeActivationTensors()
+      this.activationTensors = this.modelPredict(this.inputTensor)
+      this.keepActivationTensors()
+
+      console.log(this.activationTensors)
+      this.probs = this.activationTensors.predictions
+      const dstime = performance.now()
+      this.probs.data().then(probsArray => {
+        // const arr = common.tensorToArray(this.probs)
+        console.log('data took', performance.now() - dstime)
+        const zipped = []
+        for (let i = 0; i < probsArray.length; i++) {
+          zipped.push([probsArray[i], i])
+        }
+        zipped.sort((a, b) => b[0] - a[0])
+
+        for (let i = 0; i < 1; i++) {
+          console.log(imagenetLabels[zipped[i][1]])
+        }
+      })
+      console.log(`predict took ${performance.now() - pstime}`)
+
+      this.display()
+      console.log("took", performance.now() - ustime)
     })
-    console.log(`predict took ${performance.now() - pstime}`)
-
-    await this.display()
-    console.log("took", performance.now() - ustime)
   }
 
   update(inputs) {
@@ -358,10 +476,9 @@ export class NetVis {
     if (!this.updating && ((this.lastUpdate + this.delay * 1000 < performance.now()) || this.activationsDirty)) {
       this.updating = true
       this.lastUpdate = performance.now()
-      this._update().then(() => {
-        this.updating = false
-        this.activationsDirty = false
-      })
+      this._update()
+      this.updating = false
+      this.activationsDirty = false
     } else if (this.visualDirty) {
       this.display()
       this.visualDirty = false
